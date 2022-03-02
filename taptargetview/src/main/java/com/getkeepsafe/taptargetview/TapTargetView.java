@@ -23,6 +23,7 @@ import android.app.Dialog;
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Outline;
@@ -33,11 +34,16 @@ import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.Region;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
+
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.annotation.RequiresApi;
+
 import android.text.DynamicLayout;
 import android.text.Layout;
 import android.text.SpannableStringBuilder;
@@ -82,6 +88,7 @@ public class TapTargetView extends View {
   final int GUTTER_DIM;
   final int SHADOW_DIM;
   final int SHADOW_JITTER_DIM;
+  final int BUTTON_MARGIN_TOP;
 
   @Nullable
   final ViewGroup boundingParent;
@@ -91,6 +98,9 @@ public class TapTargetView extends View {
 
   final TextPaint titlePaint;
   final TextPaint descriptionPaint;
+  final TextPaint buttonTextPaint;
+  final RectF buttonRect;
+  final Paint buttonPaint;
   final Paint outerCirclePaint;
   final Paint outerCircleShadowPaint;
   final Paint targetCirclePaint;
@@ -103,6 +113,10 @@ public class TapTargetView extends View {
   CharSequence description;
   @Nullable
   StaticLayout descriptionLayout;
+  @Nullable
+  CharSequence buttonText;
+  @Nullable
+  StaticLayout buttonTextLayout;
   boolean isDark;
   boolean debug;
   boolean shouldTintTarget;
@@ -123,6 +137,7 @@ public class TapTargetView extends View {
   // Drawing properties
   Rect drawingBounds;
   Rect textBounds;
+  Rect buttonBounds;
 
   Path outerCirclePath;
   float outerCircleRadius;
@@ -144,6 +159,11 @@ public class TapTargetView extends View {
 
   int topBoundary;
   int bottomBoundary;
+
+  int buttonAlpha;
+  int buttonCornerRadius;
+  int buttonVerticalPadding;
+  int buttonHorizontalPadding;
 
   Bitmap tintedTarget;
 
@@ -195,32 +215,28 @@ public class TapTargetView extends View {
   }
 
   public static class Listener {
-    /** Signals that the user has clicked inside of the target **/
-    public void onTargetClick(TapTargetView view) {
+
+    public void onButtonClick(TapTargetView view) {
+      view.isInteractable = false;
       view.dismiss(true);
     }
 
-    /** Signals that the user has long clicked inside of the target **/
+    public void onTargetClick(TapTargetView view) {
+      view.isInteractable = false;
+      view.dismiss(true);
+    }
+
     public void onTargetLongClick(TapTargetView view) {
       onTargetClick(view);
     }
 
-    /** If cancelable, signals that the user has clicked outside of the outer circle **/
     public void onTargetCancel(TapTargetView view) {
       view.dismiss(false);
     }
 
-    /** Signals that the user clicked on the outer circle portion of the tap target **/
-    public void onOuterCircleClick(TapTargetView view) {
-      // no-op as default
-    }
+    public void onOuterCircleClick(TapTargetView view) { }
 
-    /**
-     * Signals that the tap target has been dismissed
-     * @param userInitiated Whether the user caused this action
-     */
-    public void onTargetDismissed(TapTargetView view, boolean userInitiated) {
-    }
+    public void onTargetDismissed(TapTargetView view, boolean userInitiated) { }
   }
 
   final FloatValueAnimatorBuilder.UpdateListener expandContractUpdateListener = new FloatValueAnimatorBuilder.UpdateListener() {
@@ -251,6 +267,8 @@ public class TapTargetView extends View {
 
       textAlpha = (int) (delayedLerp(lerpTime, 0.7f) * 255);
 
+      buttonAlpha = (int) (delayedLerp(lerpTime, 0.7f) * 255);
+
       if (expanding) {
         calculateDrawingBounds();
       }
@@ -263,12 +281,7 @@ public class TapTargetView extends View {
       .duration(250)
       .delayBy(250)
       .interpolator(new AccelerateDecelerateInterpolator())
-      .onUpdate(new FloatValueAnimatorBuilder.UpdateListener() {
-        @Override
-        public void onUpdate(float lerpTime) {
-          expandContractUpdateListener.onUpdate(lerpTime);
-        }
-      })
+      .onUpdate(expandContractUpdateListener)
       .onEnd(new FloatValueAnimatorBuilder.EndListener() {
         @Override
         public void onEnd() {
@@ -303,18 +316,8 @@ public class TapTargetView extends View {
   final ValueAnimator dismissAnimation = new FloatValueAnimatorBuilder(true)
       .duration(250)
       .interpolator(new AccelerateDecelerateInterpolator())
-      .onUpdate(new FloatValueAnimatorBuilder.UpdateListener() {
-        @Override
-        public void onUpdate(float lerpTime) {
-          expandContractUpdateListener.onUpdate(lerpTime);
-        }
-      })
-      .onEnd(new FloatValueAnimatorBuilder.EndListener() {
-        @Override
-        public void onEnd() {
-          finishDismiss(true);
-        }
-      })
+      .onUpdate(expandContractUpdateListener)
+      .onEnd(() -> finishDismiss(true))
       .build();
 
   private final ValueAnimator dismissConfirmAnimation = new FloatValueAnimatorBuilder()
@@ -333,19 +336,15 @@ public class TapTargetView extends View {
           targetCirclePulseRadius = (1.0f + lerpTime) * TARGET_RADIUS;
           targetCirclePulseAlpha = (int) ((1.0f - lerpTime) * targetCirclePulseAlpha);
           textAlpha = (int) ((1.0f - spedUpLerp) * 255.0f);
+          buttonAlpha = (int) ((1.0f - spedUpLerp) * 255.0f);
           calculateDrawingBounds();
           invalidateViewAndOutline(drawingBounds);
         }
       })
-      .onEnd(new FloatValueAnimatorBuilder.EndListener() {
-        @Override
-        public void onEnd() {
-          finishDismiss(true);
-        }
-      })
+      .onEnd(() -> finishDismiss(true))
       .build();
 
-  private ValueAnimator[] animators = new ValueAnimator[]
+  private final ValueAnimator[] animators = new ValueAnimator[]
       {expandAnimation, pulseAnimation, dismissConfirmAnimation, dismissAnimation};
 
   private final ViewTreeObserver.OnGlobalLayoutListener globalLayoutListener;
@@ -379,11 +378,12 @@ public class TapTargetView extends View {
     this.listener = userListener != null ? userListener : new Listener();
     this.title = target.title;
     this.description = target.description;
+    this.buttonText = target.buttonText;
 
-    TARGET_PADDING = UiUtil.dp(context, 20);
-    CIRCLE_PADDING = UiUtil.dp(context, 40);
+    TARGET_PADDING = UiUtil.dp(context, 80);
+    CIRCLE_PADDING = UiUtil.dp(context, 30);
     TARGET_RADIUS = UiUtil.dp(context, target.targetRadius);
-    TEXT_PADDING = UiUtil.dp(context, 40);
+    TEXT_PADDING = UiUtil.dp(context, 30);
     TEXT_SPACING = UiUtil.dp(context, 8);
     TEXT_MAX_WIDTH = UiUtil.dp(context, 360);
     TEXT_POSITIONING_BIAS = UiUtil.dp(context, 20);
@@ -391,10 +391,23 @@ public class TapTargetView extends View {
     SHADOW_DIM = UiUtil.dp(context, 8);
     SHADOW_JITTER_DIM = UiUtil.dp(context, 1);
     TARGET_PULSE_RADIUS = (int) (0.1f * TARGET_RADIUS);
+    BUTTON_MARGIN_TOP = UiUtil.dp(context, 20);
 
     outerCirclePath = new Path();
     targetBounds = new Rect();
     drawingBounds = new Rect();
+
+    buttonRect = new RectF();
+    buttonPaint = new Paint();
+    buttonPaint.setAntiAlias(true);
+    buttonPaint.setColor(Color.parseColor("#456FCC"));
+    buttonPaint.setStrokeWidth(5);
+    buttonPaint.setStyle(Paint.Style.FILL);
+
+    buttonTextPaint = new TextPaint();
+    buttonTextPaint.setTextSize(target.buttonTextSizePx(context));
+    buttonTextPaint.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+    buttonTextPaint.setAntiAlias(true);
 
     titlePaint = new TextPaint();
     titlePaint.setTextSize(target.titleTextSizePx(context));
@@ -443,101 +456,95 @@ public class TapTargetView extends View {
       layoutNoLimits = false;
     }
 
-    globalLayoutListener = new ViewTreeObserver.OnGlobalLayoutListener() {
-      @Override
-      public void onGlobalLayout() {
-        if (isDismissing) {
-          return;
-        }
-        updateTextLayouts();
-        target.onReady(new Runnable() {
-          @Override
-          public void run() {
-            final int[] offset = new int[2];
+    globalLayoutListener = () -> {
+      if (isDismissing) {
+        return;
+      }
+      updateTextLayouts();
+      target.onReady(new Runnable() {
+        @Override
+        public void run() {
+          final int[] offset = new int[2];
 
-            targetBounds.set(target.bounds());
+          targetBounds.set(target.bounds());
 
-            getLocationOnScreen(offset);
-            targetBounds.offset(-offset[0], -offset[1]);
+          getLocationOnScreen(offset);
+          targetBounds.offset(-offset[0], -offset[1]);
 
-            if (boundingParent != null) {
-              final WindowManager windowManager
-                  = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
-              final DisplayMetrics displayMetrics = new DisplayMetrics();
-              windowManager.getDefaultDisplay().getMetrics(displayMetrics);
+          if (boundingParent != null) {
+            final WindowManager windowManager
+                = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+            final DisplayMetrics displayMetrics = new DisplayMetrics();
+            windowManager.getDefaultDisplay().getMetrics(displayMetrics);
 
-              final Rect rect = new Rect();
-              boundingParent.getWindowVisibleDisplayFrame(rect);
-              int[] parentLocation = new int[2];
-              boundingParent.getLocationInWindow(parentLocation);
+            final Rect rect = new Rect();
+            boundingParent.getWindowVisibleDisplayFrame(rect);
+            int[] parentLocation = new int[2];
+            boundingParent.getLocationInWindow(parentLocation);
 
-              if (translucentStatusBar) {
-                rect.top = parentLocation[1];
-              }
-              if (translucentNavigationBar) {
-                rect.bottom = parentLocation[1] + boundingParent.getHeight();
-              }
-
-              // We bound the boundaries to be within the screen's coordinates to
-              // handle the case where the flag FLAG_LAYOUT_NO_LIMITS is set
-              if (layoutNoLimits) {
-                topBoundary = Math.max(0, rect.top);
-                bottomBoundary = Math.min(rect.bottom, displayMetrics.heightPixels);
-              } else {
-                topBoundary = rect.top;
-                bottomBoundary = rect.bottom;
-              }
+            if (translucentStatusBar) {
+              rect.top = parentLocation[1];
+            }
+            if (translucentNavigationBar) {
+              rect.bottom = parentLocation[1] + boundingParent.getHeight();
             }
 
-            drawTintedTarget();
-            requestFocus();
-            calculateDimensions();
-
-            startExpandAnimation();
+            // We bound the boundaries to be within the screen's coordinates to
+            // handle the case where the flag FLAG_LAYOUT_NO_LIMITS is set
+            if (layoutNoLimits) {
+              topBoundary = Math.max(0, rect.top);
+              bottomBoundary = Math.min(rect.bottom, displayMetrics.heightPixels);
+            } else {
+              topBoundary = rect.top;
+              bottomBoundary = rect.bottom;
+            }
           }
-        });
-      }
+
+          drawTintedTarget();
+          requestFocus();
+          calculateDimensions();
+
+          startExpandAnimation();
+        }
+      });
     };
 
     getViewTreeObserver().addOnGlobalLayoutListener(globalLayoutListener);
 
     setFocusableInTouchMode(true);
     setClickable(true);
-    setOnClickListener(new OnClickListener() {
-      @Override
-      public void onClick(View v) {
-        if (listener == null || outerCircleCenter == null || !isInteractable) return;
+    setOnClickListener(v -> {
+      if (listener == null || outerCircleCenter == null || !isInteractable) return;
 
-        final boolean clickedInTarget =
-            distance(targetBounds.centerX(), targetBounds.centerY(), (int) lastTouchX, (int) lastTouchY) <= targetCircleRadius;
-        final double distanceToOuterCircleCenter = distance(outerCircleCenter[0], outerCircleCenter[1],
-            (int) lastTouchX, (int) lastTouchY);
-        final boolean clickedInsideOfOuterCircle = distanceToOuterCircleCenter <= outerCircleRadius;
+      final boolean clickedOnButton =
+          lastTouchX > buttonBounds.left && lastTouchX < buttonBounds.right && lastTouchY > buttonBounds.top && lastTouchY < buttonBounds.bottom;
+      final boolean clickedInTarget =
+          distance(targetBounds.centerX(), targetBounds.centerY(), (int) lastTouchX, (int) lastTouchY) <= targetCircleRadius;
+      final double distanceToOuterCircleCenter = distance(outerCircleCenter[0], outerCircleCenter[1],
+          (int) lastTouchX, (int) lastTouchY);
+      final boolean clickedInsideOfOuterCircle = distanceToOuterCircleCenter <= outerCircleRadius;
 
-        if (clickedInTarget) {
-          isInteractable = false;
-          listener.onTargetClick(TapTargetView.this);
-        } else if (clickedInsideOfOuterCircle) {
-          listener.onOuterCircleClick(TapTargetView.this);
-        } else if (cancelable) {
-          isInteractable = false;
-          listener.onTargetCancel(TapTargetView.this);
-        }
+      if (clickedOnButton) {
+        listener.onButtonClick(TapTargetView.this);
+      } else if (clickedInTarget) {
+        listener.onTargetClick(TapTargetView.this);
+      } else if (clickedInsideOfOuterCircle) {
+        listener.onOuterCircleClick(TapTargetView.this);
+      } else if (cancelable) {
+        isInteractable = false;
+        listener.onTargetCancel(TapTargetView.this);
       }
     });
 
-    setOnLongClickListener(new OnLongClickListener() {
-      @Override
-      public boolean onLongClick(View v) {
-        if (listener == null) return false;
+    setOnLongClickListener(v -> {
+      if (listener == null) return false;
 
-        if (targetBounds.contains((int) lastTouchX, (int) lastTouchY)) {
-          listener.onTargetLongClick(TapTargetView.this);
-          return true;
-        }
-
-        return false;
+      if (targetBounds.contains((int) lastTouchX, (int) lastTouchY)) {
+        listener.onTargetLongClick(TapTargetView.this);
+        return true;
       }
+
+      return false;
     });
   }
 
@@ -628,12 +635,34 @@ public class TapTargetView extends View {
       descriptionPaint.setColor(titlePaint.getColor());
     }
 
+    final Integer buttonTextColor = target.buttonTextColorInt(context);
+    if (buttonTextColor != null) {
+      buttonTextPaint.setColor(buttonTextColor);
+    } else {
+      buttonTextPaint.setColor(titlePaint.getColor());
+    }
+
+    final Integer buttonColor = target.buttonColorInt(context);
+    if (buttonColor != null) {
+      buttonPaint.setColor(buttonColor);
+    }
+
+    buttonCornerRadius = target.buttonCornersRadius(context);
+
+    buttonVerticalPadding = target.buttonVerticalPadding(context);
+
+    buttonHorizontalPadding = target.buttonHorizontalPadding(context);
+
     if (target.titleTypeface != null) {
       titlePaint.setTypeface(target.titleTypeface);
     }
 
     if (target.descriptionTypeface != null) {
       descriptionPaint.setTypeface(target.descriptionTypeface);
+    }
+
+    if (target.buttonTextTypeface != null) {
+      buttonTextPaint.setTypeface(target.buttonTextTypeface);
     }
   }
 
@@ -663,72 +692,139 @@ public class TapTargetView extends View {
   }
 
   @Override
-  protected void onDraw(Canvas c) {
+  protected void onDraw(Canvas canvas) {
     if (isDismissed || outerCircleCenter == null) return;
 
     if (topBoundary > 0 && bottomBoundary > 0) {
-      c.clipRect(0, topBoundary, getWidth(), bottomBoundary);
+      canvas.clipRect(0, topBoundary, getWidth(), bottomBoundary);
     }
 
     if (dimColor != -1) {
-      c.drawColor(dimColor);
+      canvas.drawColor(dimColor);
     }
 
     int saveCount;
     outerCirclePaint.setAlpha(outerCircleAlpha);
     if (shouldDrawShadow && outlineProvider == null) {
-      saveCount = c.save();
+      saveCount = canvas.save();
       {
-        c.clipPath(outerCirclePath, Region.Op.DIFFERENCE);
-        drawJitteredShadow(c);
+        canvas.clipPath(outerCirclePath, Region.Op.DIFFERENCE);
+        drawJitteredShadow(canvas);
       }
-      c.restoreToCount(saveCount);
+      canvas.restoreToCount(saveCount);
     }
-    c.drawCircle(outerCircleCenter[0], outerCircleCenter[1], outerCircleRadius, outerCirclePaint);
+    canvas.drawCircle(outerCircleCenter[0], outerCircleCenter[1], outerCircleRadius, outerCirclePaint);
 
     targetCirclePaint.setAlpha(targetCircleAlpha);
     if (targetCirclePulseAlpha > 0) {
       targetCirclePulsePaint.setAlpha(targetCirclePulseAlpha);
-      c.drawCircle(targetBounds.centerX(), targetBounds.centerY(),
+      canvas.drawCircle(targetBounds.centerX(), targetBounds.centerY(),
           targetCirclePulseRadius, targetCirclePulsePaint);
     }
-    c.drawCircle(targetBounds.centerX(), targetBounds.centerY(),
+    canvas.drawCircle(targetBounds.centerX(), targetBounds.centerY(),
         targetCircleRadius, targetCirclePaint);
 
-    saveCount = c.save();
+    saveCount = canvas.save();
     {
-      c.translate(textBounds.left, textBounds.top);
+      canvas.translate(textBounds.left, textBounds.top);
       titlePaint.setAlpha(textAlpha);
       if (titleLayout != null) {
-        titleLayout.draw(c);
+        titleLayout.draw(canvas);
       }
 
       if (descriptionLayout != null && titleLayout != null) {
-        c.translate(0, titleLayout.getHeight() + TEXT_SPACING);
+        canvas.translate(0, titleLayout.getHeight() + TEXT_SPACING);
         descriptionPaint.setAlpha((int) (target.descriptionTextAlpha * textAlpha));
-        descriptionLayout.draw(c);
+        descriptionLayout.draw(canvas);
       }
     }
-    c.restoreToCount(saveCount);
+    canvas.restoreToCount(saveCount);
 
-    saveCount = c.save();
+    saveCount = canvas.save();
+    {
+      if (descriptionLayout != null && buttonTextLayout != null && buttonText != null) {
+        canvas.translate(buttonBounds.left, buttonBounds.top);
+
+        buttonRect.set(
+          0,
+          0,
+          2 * buttonHorizontalPadding + buttonTextPaint.measureText(buttonText, 0, buttonText.length()),
+          2 * buttonVerticalPadding + buttonTextLayout.getHeight()
+        );
+        buttonPaint.setAlpha(buttonAlpha);
+        canvas.drawRoundRect(buttonRect,buttonCornerRadius,buttonCornerRadius, buttonPaint);
+
+        canvas.translate(buttonHorizontalPadding, buttonVerticalPadding);
+        buttonTextPaint.setAlpha(buttonAlpha);
+        buttonTextLayout.draw(canvas);
+      }
+    }
+    canvas.restoreToCount(saveCount);
+
+    saveCount = canvas.save();
     {
       if (tintedTarget != null) {
-        c.translate(targetBounds.centerX() - tintedTarget.getWidth() / 2,
-            targetBounds.centerY() - tintedTarget.getHeight() / 2);
-        c.drawBitmap(tintedTarget, 0, 0, targetCirclePaint);
+        canvas.translate(targetBounds.centerX() - (int) (tintedTarget.getWidth() / 2),
+            targetBounds.centerY() - (int) (tintedTarget.getHeight() / 2));
+        canvas.drawBitmap(tintedTarget, 0, 0, targetCirclePaint);
       } else if (target.icon != null) {
-        c.translate(targetBounds.centerX() - target.icon.getBounds().width() / 2,
-            targetBounds.centerY() - target.icon.getBounds().height() / 2);
+        canvas.translate(targetBounds.centerX() - (int) (target.icon.getBounds().width() / 2),
+            targetBounds.centerY() - (int) (target.icon.getBounds().height() / 2));
         target.icon.setAlpha(targetCirclePaint.getAlpha());
-        target.icon.draw(c);
+        target.icon.draw(canvas);
       }
     }
-    c.restoreToCount(saveCount);
+    canvas.restoreToCount(saveCount);
+
+    saveCount = canvas.save();
+    {
+      if (target.targetArrowDrawable != null) {
+        int side;
+        if (targetBounds.centerX() > drawingBounds.centerX() / 2) {
+          side = textBounds.left;
+        } else {
+          side = textBounds.right;
+        }
+
+        int Ax = targetBounds.centerX();
+        int Ay = targetBounds.centerY();
+        int Bx = side;
+        int By = textBounds.top;
+
+        final float middleX = (Ax + Bx) / 2f;
+        final float middleY = (Ay + By) / 2f;
+
+        // if u need arrow in not middle but on some distance between
+        /*final float sideDistance = (float) distance(Ax, Bx, Ay, By) * 0.4f;
+        double sqrt = Math.sqrt(Math.pow(Ax - Bx, 2) + Math.pow(Ay - By, 2));
+        final float startX = (float) (Ax + (Bx - Ax) * sideDistance / distance(Ax, Bx, Ay, By));
+        final float startY = (float) (Ay + (By - Ay) * sideDistance / distance(Ax, Bx, Ay, By));*/
+
+        canvas.translate(middleX, middleY);
+
+        canvas.rotate(calculateDegreeBetweenTwoCoordinate(Ax, Ay, Bx, By));
+
+        target.targetArrowDrawable.setBounds(
+          0,
+          0,
+          target.targetArrowDrawable.getIntrinsicWidth(),
+          target.targetArrowDrawable.getIntrinsicHeight()
+        );
+        target.targetArrowDrawable.setAlpha(buttonAlpha);
+        target.targetArrowDrawable.draw(canvas);
+      }
+    }
+    canvas.restoreToCount(saveCount);
 
     if (debug) {
-      drawDebugInformation(c);
+      drawDebugInformation(canvas);
     }
+  }
+
+  float calculateDegreeBetweenTwoCoordinate(int Ax, int Ay, int Bx, int By) {
+    final double radians = Math.atan2(Ay - By, Ax - Bx);
+    final double degrees = radians / Math.PI * 180;
+    return (float) degrees;
   }
 
   @Override
@@ -835,6 +931,7 @@ public class TapTargetView extends View {
     // Draw wireframe
     debugPaint.setStyle(Paint.Style.STROKE);
     c.drawRect(textBounds, debugPaint);
+    c.drawRect(buttonBounds, debugPaint);
     c.drawRect(targetBounds, debugPaint);
     c.drawCircle(outerCircleCenter[0], outerCircleCenter[1], 10, debugPaint);
     c.drawCircle(outerCircleCenter[0], outerCircleCenter[1], calculatedOuterCircleRadius - CIRCLE_PADDING, debugPaint);
@@ -844,6 +941,7 @@ public class TapTargetView extends View {
     debugPaint.setStyle(Paint.Style.FILL);
     final String debugText =
             "Text bounds: " + textBounds.toShortString() + "\n" +
+            "Button bounds: " + buttonBounds.toShortString() + "\n" +
             "Target bounds: " + targetBounds.toShortString() + "\n" +
             "Center: " + outerCircleCenter[0] + " " + outerCircleCenter[1] + "\n" +
             "View size: " + getWidth() + " " + getHeight() + "\n" +
@@ -880,13 +978,18 @@ public class TapTargetView extends View {
 
     if (tintedTarget != null) return;
 
-    tintedTarget = Bitmap.createBitmap(icon.getIntrinsicWidth(), icon.getIntrinsicHeight(),
-        Bitmap.Config.ARGB_8888);
-    final Canvas canvas = new Canvas(tintedTarget);
-    icon.setColorFilter(new PorterDuffColorFilter(
-        outerCirclePaint.getColor(), PorterDuff.Mode.SRC_ATOP));
-    icon.draw(canvas);
-    icon.setColorFilter(null);
+    tintedTarget = drawBitmap(icon);
+  }
+
+  Bitmap drawBitmap(@NonNull Drawable drawable) {
+    final Bitmap bitmap =  Bitmap.createBitmap(drawable.getIntrinsicWidth(), drawable.getIntrinsicHeight(),
+            Bitmap.Config.ARGB_8888);
+    final Canvas canvas = new Canvas(bitmap);
+    drawable.setColorFilter(new PorterDuffColorFilter(
+            targetCirclePaint.getColor(), PorterDuff.Mode.SRC_ATOP));
+    drawable.draw(canvas);
+    drawable.setColorFilter(null);
+    return bitmap;
   }
 
   void updateTextLayouts() {
@@ -903,6 +1006,13 @@ public class TapTargetView extends View {
               Layout.Alignment.ALIGN_NORMAL, 1.0f, 0.0f, false);
     } else {
       descriptionLayout = null;
+    }
+
+    if (buttonText != null) {
+      buttonTextLayout = new StaticLayout(buttonText, buttonTextPaint, textWidth,
+              Layout.Alignment.ALIGN_NORMAL, 1.0f, 0.0f, false);
+    } else {
+      buttonTextLayout = null;
     }
   }
 
@@ -924,8 +1034,10 @@ public class TapTargetView extends View {
 
   void calculateDimensions() {
     textBounds = getTextBounds();
+    buttonBounds = getButtonBounds();
     outerCircleCenter = getOuterCircleCenterPoint();
-    calculatedOuterCircleRadius = getOuterCircleRadius(outerCircleCenter[0], outerCircleCenter[1], textBounds, targetBounds);
+    final Rect textAndButtonRect = new Rect(textBounds.left, textBounds.top, textBounds.right, buttonBounds.bottom);
+    calculatedOuterCircleRadius = getOuterCircleRadius(outerCircleCenter[0], outerCircleCenter[1], textAndButtonRect, targetBounds);
   }
 
   void calculateDrawingBounds() {
@@ -973,6 +1085,17 @@ public class TapTargetView extends View {
     return new Rect(left, top, right, top + totalTextHeight);
   }
 
+  Rect getButtonBounds() {
+    final int totalButtonHeight = getButtonHeight();
+    final int totalButtonWidth = getButtonWidth();
+
+    final int left = textBounds.left;
+    final int top = textBounds.bottom + BUTTON_MARGIN_TOP;
+    final int right = left + totalButtonWidth;
+    final int bottom = top + totalButtonHeight;
+    return new Rect(left, top, right, bottom);
+  }
+
   int[] getOuterCircleCenterPoint() {
     if (inGutter(targetBounds.centerY())) {
       return new int[]{targetBounds.centerX(), targetBounds.centerY()};
@@ -994,16 +1117,34 @@ public class TapTargetView extends View {
     return new int[] { (left + right) / 2, centerY };
   }
 
+  int getButtonHeight() {
+    if (buttonTextLayout == null) {
+      return 0;
+    } else {
+      return buttonTextLayout.getHeight();
+    }
+  }
+
+  int getButtonWidth() {
+    if (buttonTextLayout == null || buttonText == null) {
+      return 0;
+    } else {
+      return (int) buttonTextPaint.measureText(buttonText, 0, buttonText.length()) + 2 * buttonHorizontalPadding;
+    }
+  }
+
   int getTotalTextHeight() {
     if (titleLayout == null) {
       return 0;
     }
 
-    if (descriptionLayout == null) {
-      return titleLayout.getHeight() + TEXT_SPACING;
+    int textHeight = titleLayout.getHeight() + TEXT_SPACING;
+
+    if (descriptionLayout != null) {
+      textHeight += descriptionLayout.getHeight();
     }
 
-    return titleLayout.getHeight() + descriptionLayout.getHeight() + TEXT_SPACING;
+    return textHeight ;
   }
 
   int getTotalTextWidth() {
@@ -1011,11 +1152,13 @@ public class TapTargetView extends View {
       return 0;
     }
 
-    if (descriptionLayout == null) {
-      return titleLayout.getWidth();
+    int textWidth = titleLayout.getWidth();
+
+    if (descriptionLayout != null) {
+      textWidth =  Math.max(textWidth, descriptionLayout.getWidth());
     }
 
-    return Math.max(titleLayout.getWidth(), descriptionLayout.getWidth());
+    return textWidth;
   }
 
   boolean inGutter(int y) {

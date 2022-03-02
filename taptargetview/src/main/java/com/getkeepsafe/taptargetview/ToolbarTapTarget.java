@@ -33,23 +33,23 @@ import androidx.appcompat.widget.Toolbar;
 
 class ToolbarTapTarget extends ViewTapTarget {
   ToolbarTapTarget(Toolbar toolbar, @IdRes int menuItemId,
-                   CharSequence title, @Nullable CharSequence description) {
-    super(toolbar.findViewById(menuItemId), title, description);
+                   CharSequence title, @Nullable CharSequence description, @Nullable CharSequence buttonText) {
+    super(toolbar.findViewById(menuItemId), title, description, buttonText);
   }
 
   ToolbarTapTarget(android.widget.Toolbar toolbar, @IdRes int menuItemId,
-                   CharSequence title, @Nullable CharSequence description) {
-    super(toolbar.findViewById(menuItemId), title, description);
+                   CharSequence title, @Nullable CharSequence description, @Nullable CharSequence buttonText) {
+    super(toolbar.findViewById(menuItemId), title, description, buttonText);
   }
 
   ToolbarTapTarget(Toolbar toolbar, boolean findNavView,
-                   CharSequence title, @Nullable CharSequence description) {
-    super(findNavView ? findNavView(toolbar) : findOverflowView(toolbar), title, description);
+                   CharSequence title, @Nullable CharSequence description, @Nullable CharSequence buttonText) {
+    super(findNavView ? findNavView(toolbar) : findOverflowView(toolbar), title, description, buttonText);
   }
 
   ToolbarTapTarget(android.widget.Toolbar toolbar, boolean findNavView,
-                   CharSequence title, @Nullable CharSequence description) {
-    super(findNavView ? findNavView(toolbar) : findOverflowView(toolbar), title, description);
+                   CharSequence title, @Nullable CharSequence description, @Nullable CharSequence buttonText) {
+    super(findNavView ? findNavView(toolbar) : findOverflowView(toolbar), title, description, buttonText);
   }
 
   private static ToolbarProxy proxyOf(Object instance) {
