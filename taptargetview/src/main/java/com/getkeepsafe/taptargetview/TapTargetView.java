@@ -170,6 +170,9 @@ public class TapTargetView extends View {
   Listener listener;
 
   @Nullable
+  ICustomElement customElement;
+
+  @Nullable
   ViewOutlineProvider outlineProvider;
 
   public static TapTargetView showFor(Activity activity, TapTarget target) {
@@ -237,6 +240,17 @@ public class TapTargetView extends View {
     public void onOuterCircleClick(TapTargetView view) { }
 
     public void onTargetDismissed(TapTargetView view, boolean userInitiated) { }
+
+    public void onCustomElementClick(TapTargetView view) { }
+  }
+
+  public interface ICustomElement {
+
+    void draw(Canvas canvas, int alpha);
+
+    @NonNull Rect getClickBounds(int startX, int startY);
+
+    @NonNull Rect getDrawBounds(int startX, int startY);
   }
 
   final FloatValueAnimatorBuilder.UpdateListener expandContractUpdateListener = new FloatValueAnimatorBuilder.UpdateListener() {
@@ -380,10 +394,10 @@ public class TapTargetView extends View {
     this.description = target.description;
     this.buttonText = target.buttonText;
 
-    TARGET_PADDING = UiUtil.dp(context, 80);
+    TARGET_PADDING = UiUtil.dp(context, calculateTargetPadding());
     CIRCLE_PADDING = UiUtil.dp(context, 30);
-    TARGET_RADIUS = UiUtil.dp(context, target.targetRadius);
     TEXT_PADDING = UiUtil.dp(context, 30);
+    TARGET_RADIUS = UiUtil.dp(context, target.targetRadius);
     TEXT_SPACING = UiUtil.dp(context, 8);
     TEXT_MAX_WIDTH = UiUtil.dp(context, 360);
     TEXT_POSITIONING_BIAS = UiUtil.dp(context, 20);
@@ -516,6 +530,13 @@ public class TapTargetView extends View {
     setOnClickListener(v -> {
       if (listener == null || outerCircleCenter == null || !isInteractable) return;
 
+      boolean clickedOnCustomElement = false;
+      if (customElement != null) {
+        final Rect customBounds = customElement.getClickBounds(buttonBounds.left, buttonBounds.bottom);
+        clickedOnCustomElement =
+          lastTouchX > customBounds.left && lastTouchX < customBounds.right && lastTouchY > customBounds.top && lastTouchY < customBounds.bottom;
+      }
+
       final boolean clickedOnButton =
           lastTouchX > buttonBounds.left && lastTouchX < buttonBounds.right && lastTouchY > buttonBounds.top && lastTouchY < buttonBounds.bottom;
       final boolean clickedInTarget =
@@ -528,6 +549,8 @@ public class TapTargetView extends View {
         listener.onButtonClick(TapTargetView.this);
       } else if (clickedInTarget) {
         listener.onTargetClick(TapTargetView.this);
+      } else if (clickedOnCustomElement) {
+        listener.onCustomElementClick(TapTargetView.this);
       } else if (clickedInsideOfOuterCircle) {
         listener.onOuterCircleClick(TapTargetView.this);
       } else if (cancelable) {
@@ -548,6 +571,22 @@ public class TapTargetView extends View {
     });
   }
 
+  private int calculateTargetPadding() {
+    if (target.targetArrowDrawable != null) {
+
+      final int arrowPadding;
+      if (target.targetArrowPadding != null) {
+        arrowPadding = target.targetArrowPadding;
+      } else {
+        arrowPadding = target.targetArrowDrawable.getMinimumHeight();
+      }
+
+      return 30 + arrowPadding;
+    } else {
+      return 30;
+    }
+  }
+
   private void startExpandAnimation() {
     if (!visible) {
       isInteractable = false;
@@ -560,6 +599,7 @@ public class TapTargetView extends View {
     shouldTintTarget = !target.transparentTarget && target.tintTarget;
     shouldDrawShadow = target.drawShadow;
     cancelable = target.cancelable;
+    customElement = target.customElement;
 
     // We can't clip out portions of a view outline, so if the user specified a transparent
     // target, we need to fallback to drawing a jittered shadow approximation
@@ -763,6 +803,15 @@ public class TapTargetView extends View {
 
     saveCount = canvas.save();
     {
+      if (customElement != null) {
+        canvas.translate(buttonBounds.left, buttonBounds.bottom);
+        customElement.draw(canvas, textAlpha);
+      }
+    }
+    canvas.restoreToCount(saveCount);
+
+    saveCount = canvas.save();
+    {
       if (tintedTarget != null) {
         canvas.translate(targetBounds.centerX() - (int) (tintedTarget.getWidth() / 2),
             targetBounds.centerY() - (int) (tintedTarget.getHeight() / 2));
@@ -791,26 +840,20 @@ public class TapTargetView extends View {
         int Bx = side;
         int By = textBounds.top;
 
-        final float middleX = (Ax + Bx) / 2f;
-        final float middleY = (Ay + By) / 2f;
+        final float biasDistance = (float) distance(Ax, Bx, Ay, By) * target.targetArrowBias;
+        final float startX = (float) (Ax + (Bx - Ax) * biasDistance / distance(Ax, Bx, Ay, By));
+        final float startY = (float) (Ay + (By - Ay) * biasDistance / distance(Ax, Bx, Ay, By));
 
-        // if u need arrow in not middle but on some distance between
-        /*final float sideDistance = (float) distance(Ax, Bx, Ay, By) * 0.4f;
-        double sqrt = Math.sqrt(Math.pow(Ax - Bx, 2) + Math.pow(Ay - By, 2));
-        final float startX = (float) (Ax + (Bx - Ax) * sideDistance / distance(Ax, Bx, Ay, By));
-        final float startY = (float) (Ay + (By - Ay) * sideDistance / distance(Ax, Bx, Ay, By));*/
-
-        canvas.translate(middleX, middleY);
-
+        canvas.translate(startX, startY);
         canvas.rotate(calculateDegreeBetweenTwoCoordinate(Ax, Ay, Bx, By));
 
         target.targetArrowDrawable.setBounds(
-          0,
-          0,
-          target.targetArrowDrawable.getIntrinsicWidth(),
-          target.targetArrowDrawable.getIntrinsicHeight()
+          - target.targetArrowDrawable.getIntrinsicWidth() / 2,
+          - target.targetArrowDrawable.getIntrinsicHeight() / 2,
+          target.targetArrowDrawable.getIntrinsicWidth() / 2,
+          target.targetArrowDrawable.getIntrinsicHeight() / 2
         );
-        target.targetArrowDrawable.setAlpha(buttonAlpha);
+        target.targetArrowDrawable.setAlpha(textAlpha);
         target.targetArrowDrawable.draw(canvas);
       }
     }
@@ -1036,8 +1079,18 @@ public class TapTargetView extends View {
     textBounds = getTextBounds();
     buttonBounds = getButtonBounds();
     outerCircleCenter = getOuterCircleCenterPoint();
-    final Rect textAndButtonRect = new Rect(textBounds.left, textBounds.top, textBounds.right, buttonBounds.bottom);
-    calculatedOuterCircleRadius = getOuterCircleRadius(outerCircleCenter[0], outerCircleCenter[1], textAndButtonRect, targetBounds);
+    final int bottom = calculateBottomOfContent();
+    final Rect contentRect = new Rect(textBounds.left, textBounds.top, textBounds.right, bottom);
+    calculatedOuterCircleRadius = getOuterCircleRadius(outerCircleCenter[0], outerCircleCenter[1], contentRect, targetBounds);
+  }
+
+  private int calculateBottomOfContent() {
+    if (customElement != null) {
+      final Rect customBounds = customElement.getDrawBounds(buttonBounds.left , buttonBounds.bottom);
+      return customBounds.bottom;
+    } else {
+      return buttonBounds.bottom;
+    }
   }
 
   void calculateDrawingBounds() {
@@ -1121,7 +1174,7 @@ public class TapTargetView extends View {
     if (buttonTextLayout == null) {
       return 0;
     } else {
-      return buttonTextLayout.getHeight();
+      return buttonTextLayout.getHeight() + 2 * buttonVerticalPadding;
     }
   }
 

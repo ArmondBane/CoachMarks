@@ -51,8 +51,13 @@ public class TapTarget {
   int targetRadius = 44;
 
   Rect bounds;
+
   Drawable icon;
+
   Drawable targetArrowDrawable;
+  Integer targetArrowPadding;
+  Float targetArrowBias;
+
   Typeface titleTypeface;
   Typeface descriptionTypeface;
   Typeface buttonTextTypeface;
@@ -106,6 +111,16 @@ public class TapTarget {
   boolean tintTarget = true;
   boolean transparentTarget = false;
   float descriptionTextAlpha = 0.54f;
+
+  @Nullable
+  TapTargetView.ICustomElement customElement;
+
+  public TapTarget customElement(
+    TapTargetView.ICustomElement customElement
+  ) {
+    this.customElement = customElement;
+    return this;
+  }
 
   /**
    * Return a tap target for the overflow button from the given toolbar
@@ -515,10 +530,37 @@ public class TapTarget {
     return icon(icon, false);
   }
 
-  /** Specify the icon that will be drawn in the center of the target bounds **/
   public TapTarget targetArrowDrawable(Drawable arrowDrawable) {
     if (arrowDrawable == null) throw new IllegalArgumentException("Cannot use null drawable");
     this.targetArrowDrawable = arrowDrawable;
+    this.targetArrowPadding = null;
+    this.targetArrowBias = 0.4f;
+    return this;
+  }
+
+  public TapTarget targetArrowDrawable(Drawable arrowDrawable, Integer padding) {
+    if (arrowDrawable == null) throw new IllegalArgumentException("Cannot use null drawable");
+    this.targetArrowDrawable = arrowDrawable;
+    this.targetArrowPadding = padding;
+    this.targetArrowBias = 0.4f;
+    return this;
+  }
+
+  public TapTarget targetArrowDrawable(Drawable arrowDrawable, Float bias) {
+    if (arrowDrawable == null) throw new IllegalArgumentException("Cannot use null drawable");
+    if (bias < 0.0f || bias > 1.0f) throw new IllegalArgumentException("Require bias > 0.0f && bias < 1.0f");
+    this.targetArrowDrawable = arrowDrawable;
+    this.targetArrowPadding = null;
+    this.targetArrowBias = bias;
+    return this;
+  }
+
+  public TapTarget targetArrowDrawable(Drawable arrowDrawable, Integer padding, Float bias) {
+    if (arrowDrawable == null) throw new IllegalArgumentException("Cannot use null drawable");
+    if (bias < 0.0f || bias > 1.0f) throw new IllegalArgumentException("Require bias > 0.0f && bias < 1.0f");
+    this.targetArrowDrawable = arrowDrawable;
+    this.targetArrowPadding = padding;
+    this.targetArrowBias = bias;
     return this;
   }
 

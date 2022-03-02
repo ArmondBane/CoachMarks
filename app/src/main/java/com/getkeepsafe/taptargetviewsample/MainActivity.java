@@ -1,10 +1,15 @@
 package com.getkeepsafe.taptargetviewsample;
 
 import android.content.DialogInterface;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
+
+import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
@@ -49,7 +54,8 @@ public class MainActivity extends AppCompatActivity {
     final TapTargetSequence sequence = new TapTargetSequence(this)
         .targets(
             // This tap target will target the back button, we just need to pass its containing toolbar
-            TapTarget.forToolbarNavigationIcon(toolbar, "This is the back button", sassyDesc, null).id(1).transparentTarget(true).targetArrowDrawable(arrow),
+            TapTarget.forToolbarNavigationIcon(toolbar, "This is the back button", sassyDesc, null).id(1).transparentTarget(true)
+                    .targetArrowDrawable(arrow, 40),
             // Likewise, this tap target will target the search button
             TapTarget.forToolbarMenuItem(toolbar, R.id.search, "This is a search icon", "As you can see, it has gotten pretty dark around here...", null)
                 .dimColor(android.R.color.black)
@@ -57,15 +63,16 @@ public class MainActivity extends AppCompatActivity {
                 .targetCircleColor(android.R.color.black)
                 .transparentTarget(true)
                 .textColor(android.R.color.black)
-                .targetArrowDrawable(arrow)
+                .targetArrowDrawable(arrow, 20)
                 .id(2),
             // You can also target the overflow button in your toolbar
-            TapTarget.forToolbarOverflow(toolbar, "This will show more options", "But they're not useful :(", null).id(3).transparentTarget(true),
+            TapTarget.forToolbarOverflow(toolbar, "This will show more options", "But they're not useful :(", null).id(3).transparentTarget(true)
+                    .targetArrowDrawable(arrow, 20),
             // This tap target will target our droid buddy at the given target rect
             TapTarget.forBounds(droidTarget, "Oh look!", "You can point to any part of the screen. You also can't cancel this one!")
                 .cancelable(false)
                 .icon(droid)
-                .targetArrowDrawable(arrow)
+                .targetArrowDrawable(arrow, 20)
                 .id(4)
         )
         .listener(
@@ -119,38 +126,56 @@ public class MainActivity extends AppCompatActivity {
         spannedDesc,
         "Understand"
       )
-        .targetArrowDrawable(arrow)
+        .targetArrowDrawable(arrow, 20, 0.3f)
         .cancelable(false)
         .drawShadow(true)
         .titleTextDimen(R.dimen.title_text_size)
         .transparentTarget(true)
+        .customElement(
+           new TapTargetView.ICustomElement() {
+               @Override
+               public void draw(Canvas canvas, int alpha) {
+                 final Paint paint = new Paint();
+                   paint.setAntiAlias(true);
+                   paint.setColor(Color.parseColor("#456FCC"));
+                   paint.setStrokeWidth(5);
+                   paint.setStyle(Paint.Style.FILL);
+                   paint.setAlpha(alpha);
+
+                final Rect rect = new Rect(0,20,60,60);
+                canvas.drawRect(rect, paint);
+               }
+               @NonNull
+               @Override
+               public Rect getClickBounds(int startX, int startY) {
+                   return new Rect(startX, startY, startX + 60, startY + 60);
+               }
+               @NonNull
+               @Override
+               public Rect getDrawBounds(int startX, int startY) {
+                   return new Rect(startX, startY, startX + 60, startY + 60);
+               }
+           }
+        )
         .targetRadius(25),
-      new TapTargetView.Listener() {
-
-        @Override
-        public void onButtonClick(TapTargetView view) {
-          super.onButtonClick(view);
-          // .. which evidently starts the sequence we defined earlier
-          sequence.start();
+        new TapTargetView.Listener() {
+            @Override
+            public void onButtonClick(TapTargetView view) {
+              super.onButtonClick(view);
+              sequence.start();
+            }
+            @Override
+            public void onTargetClick(TapTargetView view) { }
+            @Override
+            public void onCustomElementClick(TapTargetView view) {
+                Toast.makeText(view.getContext(), "custom Click!", Toast.LENGTH_SHORT).show();
+            }
+            @Override
+            public void onOuterCircleClick(TapTargetView view) {
+              super.onOuterCircleClick(view);
+              Toast.makeText(view.getContext(), "You clicked the outer circle!", Toast.LENGTH_SHORT).show();
+            }
         }
-
-        @Override
-        public void onTargetClick(TapTargetView view) {
-          // .. which evidently starts the sequence we defined earlier
-          //sequence.start();
-        }
-
-        @Override
-        public void onOuterCircleClick(TapTargetView view) {
-          super.onOuterCircleClick(view);
-          Toast.makeText(view.getContext(), "You clicked the outer circle!", Toast.LENGTH_SHORT).show();
-        }
-
-        @Override
-        public void onTargetDismissed(TapTargetView view, boolean userInitiated) {
-          Log.d("TapTargetViewSample", "You dismissed me :(");
-        }
-      }
     );
 
   }
